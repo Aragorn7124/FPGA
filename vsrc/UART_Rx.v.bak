@@ -1,0 +1,115 @@
+module UART_Rx (
+  input clk,
+  input rst_n,
+  input rxd,
+
+  output reg [7:0] rx_data,
+  output reg rx_done
+);
+
+// arg def
+  localparam CLK_FREQ = 50_000_000;
+  localparam BAUD_RATE = 115200;
+  localparam BAUD_CNT_MAX = CLK_FREQ / BAUD_RATE;
+  localparam BYTE_CNT_MAX = BAUD_CNT_MAX + BAUD_CNT_MAX/2;
+
+// state def
+  localparam S_IDLE = 2'b00;
+  localparam S_START = 2'b01;
+  localparam S_DATA = 2'b10;
+  localparam S_STOP = 2'b11;
+
+// internal reg def
+  reg [1:0] state;
+  reg [9:0] baud_cnt;
+  reg [2:0] bit_idx;
+  reg [7:0] data_shift;
+  reg rxd_d;
+
+  // 0 -> 1 fall clk
+    wire rxd_fall = rxd_d && !rxd;
+    always @(posedge clk or negedge rst_n) begin
+      //br1: rst
+        if(!rst_n) begin
+          rxd_d <= 1'b1;
+        end
+      //br2: update
+        else begin
+          rxd_d <= rxd;
+        end
+    end
+
+//main FSM
+  always @(posedge clk or negedge rst_n) begin
+    //br1: rst
+      if(!rst_n)begin
+        state <= 2'b0;
+        baud_cnt <= 10'd0;
+        bit_idx <= 3'd0;
+        data_shift <= 8'd0;
+      end
+
+    //br2: FSM
+      else begin
+
+        rx_done <= 1'b0;
+
+        case(state)
+          S_IDLE: begin
+            if(rxd_fall) begin
+              state <= S_START;
+              baud_cnt <= 10'd0;
+            end
+          end
+
+          S_START: begin
+            if(baud_cnt == BYTE_CNT_MAX-1) begin
+              data_shift[0] <= rxd_d;
+              baud_cnt <= 10'd0;
+              bit_idx <= 3'd1;
+              state <= S_DATA;
+            end
+            else begin
+              baud_cnt <= baud_cnt + 1'b1;
+            end
+          end
+
+          S_DATA: begin
+            if(baud_cnt == BAUD_CNT_MAX - 1) begin
+              data_shift[bit_idx] <= rxd;
+              baud_cnt <= 10'd0;
+
+              if(bit_idx == 3'd7) begin
+                state <= S_STOP;
+              end
+              else begin
+                bit_idx <= bit_idx + 1'b1;
+              end
+            end
+            else begin
+              baud_cnt <= baud_cnt + 1'b1;
+            end
+          end
+
+          S_STOP: begin
+            if(baud_cnt == BAUD_CNT_MAX - 1) begin
+              rx_data <= data_shift;
+              rx_done <= 1'b1;
+              baud_cnt <= 10'd0;
+              state <= S_IDLE;
+            end
+            else begin
+              baud_cnt <= baud_cnt + 1'b1;
+            end
+          end
+
+
+          default: begin
+            state <= S_IDLE;
+          end
+        endcase
+
+      end
+  end
+
+endmodule
